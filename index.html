@@ -1,0 +1,1064 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>シンナー配合計算</title>
+<link rel="icon" href="data:,">
+<style>
+html { -webkit-text-size-adjust: 100%; color-scheme: light; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+</style>
+<script>
+/* claude.ai の外で動かすための互換層: 記録はこの端末のブラウザ(localStorage)に保存 */
+(function () {
+  if (window.claude && window.claude.use) return;
+  var KEY = 'thinner-own-records-v1', subs = [];
+  function load() { try { var o = JSON.parse(localStorage.getItem(KEY) || '{}'); return (o && typeof o === 'object') ? o : {}; } catch (e) { return {}; } }
+  function save(o) { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { var x = new Error('save'); x.code = 'unavailable'; throw x; } }
+  function emit() { var o = load(); var snap = { docs: Object.keys(o).map(function (id) { return { id: id, data: function () { return o[id]; } }; }) }; subs.forEach(function (f) { f(snap); }); }
+  var col = {
+    onSnapshot: function (next) { subs.push(next); setTimeout(emit, 0); return function () { subs = subs.filter(function (f) { return f !== next; }); }; },
+    add: function (d) { return new Promise(function (ok) { var o = load(), id = 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); o[id] = d; save(o); emit(); ok({ id: id }); }); },
+    doc: function (id) { return { delete: function () { return new Promise(function (ok) { var o = load(); delete o[id]; save(o); emit(); ok(); }); } }; }
+  };
+  var db = { collection: function () { return col; } };
+  var dl = { save: function (r) { return new Promise(function (ok) {
+    var url = URL.createObjectURL(new Blob([r.data], { type: 'application/json' }));
+    var a = document.createElement('a'); a.href = url; a.download = r.filename; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000); ok({ status: 'saved' }); }); } };
+  window.claude = { use: function (n) { return Promise.resolve(n === 'db' ? db : n === 'downloads' ? dl : null); } };
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap">
+<style>
+/* Layout: 左に入力、右に結果(配合・ミキシングカップ)。その下に、ダイヤルで選ぶ記録追加欄、近い記録、気温グラフ。狭い画面では縦に積む。 */
+:root {
+  --bg: #EBEFEF;
+  --surface: #F6F8F8;
+  --ink: #182427;
+  --muted: #56666A;
+  --line: #C6CFD0;
+  --chip: #E0E6E6;
+  --base: #B6C2C3;
+  --warn-bg: #F7ECD6;
+  --warn-ink: #5E4308;
+  --ok-bg: #DDF0E5;
+  --ok-ink: #1E6B45;
+  --err-ink: #A32E2E;
+  --ultra: #B8431F;
+  --super: #C98F1C;
+  --slow: #2F6FA3;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121819;
+    --surface: #1A2224;
+    --ink: #E4ECEC;
+    --muted: #8FA0A3;
+    --line: #2E3A3D;
+    --chip: #243033;
+    --base: #3C4B4E;
+    --warn-bg: #3A2F14;
+    --warn-ink: #F0D9A0;
+  --ok-bg: #17342A;
+    --ok-ink: #7FD1A4;
+    --err-ink: #F29B9B;
+    --ultra: #E27A50;
+    --super: #E5B04F;
+    --slow: #6BA7D3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121819;
+  --surface: #1A2224;
+  --ink: #E4ECEC;
+  --muted: #8FA0A3;
+  --line: #2E3A3D;
+  --chip: #243033;
+  --base: #3C4B4E;
+  --warn-bg: #3A2F14;
+  --warn-ink: #F0D9A0;
+  --ok-bg: #17342A;
+  --ok-ink: #7FD1A4;
+  --err-ink: #F29B9B;
+  --ultra: #E27A50;
+  --super: #E5B04F;
+  --slow: #6BA7D3;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.65;
+  padding-block: 24px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.page { max-width: 980px; margin: 0 auto; display: grid; gap: 32px; }
+h1 { font-size: 26px; line-height: 1.25; font-weight: 900; margin: 0 0 6px; text-wrap: balance; letter-spacing: 0.01em; }
+h2 { font-size: 16px; font-weight: 700; margin: 0 0 12px; text-wrap: balance; }
+p { margin: 0; }
+.lead { color: var(--muted); max-width: 40em; }
+.mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+
+.main { display: grid; gap: 28px; grid-template-columns: minmax(0, 330px) minmax(0, 1fr); align-items: start; }
+@media (max-width: 760px) { .main { grid-template-columns: minmax(0, 1fr); } }
+
+/* 入力パネル */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 20px; min-width: 0; }
+fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+legend, .lab { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--muted); padding: 0; margin-bottom: 8px; display: block; }
+.seg { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg label { position: relative; flex: 1 1 auto; min-width: 0; }
+.seg input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.seg span {
+  display: block; text-align: center; padding: 10px 12px; min-height: 44px; border-radius: 8px;
+  background: var(--chip); color: var(--ink); font-weight: 500; border: 1px solid transparent;
+}
+.seg input:checked + span { background: var(--ink); color: var(--bg); font-weight: 700; }
+.seg input:focus-visible + span { outline: 3px solid var(--slow); outline-offset: 2px; }
+.stepper { display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px; gap: 8px; }
+.stepper button {
+  min-height: 52px; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+  font-size: 24px; font-family: var(--font-num); cursor: pointer;
+}
+.stepper button:active { background: var(--line); }
+.stepper button:focus-visible, .num:focus-visible, .txt:focus-visible, .btn:focus-visible { outline: 3px solid var(--slow); outline-offset: 2px; }
+.num {
+  width: 100%; min-height: 52px; text-align: center; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font-family: var(--font-num); font-size: 26px; font-weight: 600;
+}
+.txt {
+  width: 100%; min-height: 48px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg);
+  color: var(--ink); font-family: var(--font-body); font-size: 16px; padding: 8px 12px;
+}
+.btn {
+  min-height: 48px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--chip);
+  color: var(--ink); font-family: var(--font-body); font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.small { min-height: 36px; padding: 4px 12px; font-size: 13px; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* 結果 */
+.result { display: grid; gap: 18px; min-width: 0; }
+.pair { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.g { display: grid; gap: 2px; min-width: 0; }
+.gname { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+.sw.u { background: var(--ultra); } .sw.s { background: var(--super); } .sw.l { background: var(--slow); }
+.gnum { font-family: var(--font-num); font-weight: 600; font-size: 56px; line-height: 1; letter-spacing: -0.02em; }
+.colon { font-family: var(--font-num); font-size: 40px; line-height: 1; color: var(--muted); padding-bottom: 4px; }
+.ratio { font-family: var(--font-num); font-size: 18px; font-weight: 600; }
+.ratio small { font-family: var(--font-body); font-weight: 400; color: var(--muted); font-size: 14px; }
+.sub { color: var(--muted); font-size: 14px; }
+.warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
+.cupwrap { max-width: 320px; }
+.cupwrap svg { display: block; width: 100%; height: auto; }
+.cup-out { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cup-tick { stroke: var(--ink); stroke-width: 1; opacity: 0.45; }
+.cup-lbl { fill: var(--muted); font-size: 9px; font-family: var(--font-num); }
+.lay { stroke: var(--bg); stroke-width: 1; }
+.lay.base { fill: var(--base); } .lay.u { fill: var(--ultra); } .lay.s { fill: var(--super); } .lay.l { fill: var(--slow); }
+.lead-line { fill: none; stroke: var(--muted); stroke-width: 1; }
+.t-name { fill: var(--ink); font-size: 12px; font-weight: 700; font-family: var(--font-body); }
+.t-val { fill: var(--ink); font-size: 12px; font-weight: 600; font-family: var(--font-num); text-anchor: end; }
+
+/* ダイヤル */
+.dials { display: grid; gap: 14px 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.dial { min-width: 0; }
+.dial.wide { grid-column: span 2; }
+.dial .cap { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 6px; }
+.box { position: relative; height: 160px; border-radius: 10px; background: var(--chip); overflow: hidden; }
+.wheel {
+  height: 100%; overflow-y: auto; overflow-x: hidden; scroll-snap-type: y mandatory; scrollbar-width: none;
+  overscroll-behavior: contain; outline: none; touch-action: pan-y; cursor: grab;
+}
+.wheel::-webkit-scrollbar { display: none; }
+.wheel .pad { height: 60px; }
+.wheel .it {
+  height: 40px; display: flex; align-items: center; justify-content: center; scroll-snap-align: center;
+  color: var(--muted); font-size: 15px; white-space: nowrap; cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.wheel .it.on { color: var(--ink); font-weight: 700; font-size: 17px; }
+.dial.small .wheel .it { font-size: 14px; }
+.dial.small .wheel .it.on { font-size: 15px; }
+.band { position: absolute; left: 0; right: 0; top: 60px; height: 40px; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); pointer-events: none; }
+.wheel:focus-visible ~ .band { border-color: var(--slow); border-width: 3px; }
+.fade { position: absolute; left: 0; right: 0; height: 54px; pointer-events: none; }
+.fade.top { top: 0; background: linear-gradient(var(--chip), transparent); }
+.fade.bot { bottom: 0; background: linear-gradient(transparent, var(--chip)); }
+.preview { font-weight: 700; min-height: 1.65em; }
+.preview .mono { font-weight: 600; }
+.msg { min-height: 1.65em; font-size: 14px; }
+.msg.ok { color: var(--ok-ink); }
+.msg.err { color: var(--err-ink); }
+.hint { color: var(--muted); font-size: 13px; }
+
+/* 表・グラフ */
+.section { display: grid; gap: 10px; min-width: 0; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 11px; letter-spacing: 0.08em; color: var(--muted); font-weight: 700; }
+td.memo { white-space: normal; min-width: 16em; }
+td.n, th.n { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+td.dim { color: var(--muted); }
+td.empty { white-space: normal; color: var(--muted); padding: 16px 12px; }
+.tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 6px; margin-left: 6px; border-radius: 4px; background: var(--ink); color: var(--bg); }
+.note { color: var(--muted); font-size: 13px; max-width: 46em; }
+details { border-top: 1px solid var(--line); padding-top: 12px; }
+summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
+summary:focus-visible { outline: 3px solid var(--slow); outline-offset: 2px; }
+details[open] summary { margin-bottom: 10px; }
+.chartbox { max-width: 600px; }
+.chartbox svg { display: block; width: 100%; height: auto; }
+.grid-l { stroke: var(--line); stroke-width: 1; }
+.axis-t { fill: var(--muted); font-size: 10px; font-family: var(--font-num); }
+.axis-g { fill: var(--ink); font-size: 11px; font-weight: 700; font-family: var(--font-body); text-anchor: end; }
+.pt { fill: var(--ink); stroke: var(--ink); stroke-width: 1.5; }
+.pt.adj { fill: none; }
+.curve { fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+.cur-line { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.6; }
+.cur-pt { fill: var(--bg); stroke: var(--ink); stroke-width: 3; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.k-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); display: inline-block; }
+.k-ring { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--ink); display: inline-block; }
+.k-cur { width: 12px; height: 12px; border-radius: 50%; border: 3px solid var(--ink); display: inline-block; }
+.k-line { width: 18px; height: 0; border-top: 2.5px solid var(--ink); display: inline-block; }
+.res { display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--chip); color: var(--ink); white-space: nowrap; }
+.res.best { background: var(--ok-bg); color: var(--ok-ink); }
+.res.fix { background: var(--warn-bg); color: var(--warn-ink); }
+.ta { width: 100%; min-height: 110px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-family: var(--font-num); font-size: 16px; padding: 10px 12px; resize: vertical; }
+.ta:focus-visible { outline: 3px solid var(--slow); outline-offset: 2px; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+
+<script id="model">
+/* 計算モデル(画面に依存しない部分)。番手の位置 s: スロー100=0、スーパー100=1、ウルトラ100=2 */
+const WX = { '晴れ': 0, '曇り': 2, '雨': 4, '雪': 3.6 };
+const WX_ALL = { '晴れ': 0, '晴れ曇り': 1, '曇り': 2, '雨曇り': 3, '雨': 4, '雪': 3.6 };
+const CLEARS = ['GL', 'QD', 'SG', 'グリフィス'];
+/* 記録の仕上がりを、計算に使う番手の補正(a)と重み(k)に直す */
+const RES = {
+  'ベスト': { a: 0, k: 1.5 },
+  '塗りやすい': { a: 0, k: 1 },
+  '伸びが悪い': { a: 0.1, k: 1 },
+  '垂れ・溜まり': { a: -0.1, k: 1 },
+  '伸び過ぎ': { a: -0.1, k: 1 }
+};
+/* n=シート行, c=クリヤー, t=気温, w=天気, p=天気の位置, u/s/l=ウルトラ/スーパー/スロー(%), r=割合,
+   a=メモから付けた番手の補正, ra=メモから付けた割合の補正, k=重み(ベスト・丁度良いは1.5、メモなしは0.5) */
+const BASE = [
+  { n: 2, c: 'GL', t: 24, w: '曇り', p: 2, u: 40, s: 60, l: 0, r: 1.27, m: 'もう少しウルトラを入れても良い', a: 0.1, ra: 0, k: 1 },
+  { n: 3, c: 'QD', t: 23, w: '晴れ曇り', p: 1, u: 50, s: 50, l: 0, r: 1.30, m: '伸びやすく垂れないギリギリのライン', a: -0.05, ra: 0, k: 1 },
+  { n: 4, c: 'GL', t: 24, w: '晴れ', p: 0, u: 80, s: 20, l: 0, r: 1.27, m: 'バンパー用ハード 塗りやすくちょうどよい', a: 0, ra: 0, k: 1.5 },
+  { n: 5, c: 'QD', t: 14, w: '曇り', p: 2, u: 0, s: 100, l: 0, r: 1.30, m: '丁度良い', a: 0, ra: 0, k: 1.5 },
+  { n: 6, c: 'グリフィス', t: 17, w: '晴れ', p: 0, u: 30, s: 70, l: 0, r: 1.27, m: '塗りやすいけど気を抜くと垂れるかも', a: -0.05, ra: 0, k: 1 },
+  { n: 7, c: 'GL', t: 19, w: '晴れ', p: 0, u: 40, s: 60, l: 0, r: 1.27, m: '少し伸びが悪い', a: 0.1, ra: 0, k: 1 },
+  { n: 8, c: 'グリフィス', t: 21, w: '晴れ', p: 0, u: 75, s: 25, l: 0, r: null, m: '', a: 0, ra: 0, k: 0.5 },
+  { n: 9, c: 'QD', t: 16, w: '曇り', p: 2, u: 0, s: 100, l: 0, r: 1.30, m: 'ちょっと伸びが悪い寄り', a: 0.1, ra: 0, k: 1 },
+  { n: 10, c: 'QD', t: 17, w: '晴れ', p: 0, u: 0, s: 100, l: 0, r: 1.30, m: '丁度良い', a: 0, ra: 0, k: 1.5 },
+  { n: 11, c: 'QD', t: 12, w: '曇り', p: 2, u: 0, s: 85, l: 15, r: 1.30, m: 'めちゃめちゃ塗りやすい', a: 0, ra: 0, k: 1.5 },
+  { n: 12, c: 'GL', t: 15, w: '晴れ', p: 0, u: 27, s: 73, l: 0, r: 1.27, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 13, c: 'QD', t: 12, w: '晴れ', p: 0, u: 0, s: 100, l: 0, r: 1.30, m: '塗りやすいけど給油口の縁とかだけ溜まるから番手を早くしたほうがいいかも', a: -0.1, ra: 0, k: 1 },
+  { n: 14, c: 'GL', t: 12, w: '雪', p: 3.6, u: 0, s: 100, l: 0, r: 1.28, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 15, c: 'SG', t: 12, w: '晴れ', p: 0, u: 0, s: 100, l: 0, r: 1.30, m: 'ボンネット 塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 16, c: 'SG', t: 11, w: '雪', p: 3.6, u: 0, s: 100, l: 0, r: 1.30, m: 'ハイエース側面 塗りやすいが溜まりやすい シンナー量を減らしてもいいかも', a: -0.05, ra: -0.02, k: 1 },
+  { n: 17, c: 'SG', t: 11, w: '曇り', p: 2, u: 0, s: 90, l: 10, r: 1.28, m: '流石に伸びない', a: 0.1, ra: 0, k: 1 },
+  { n: 18, c: 'SG', t: 11, w: '晴れ', p: 0, u: 0, s: 100, l: 0, r: 1.30, m: 'ボンネット ワルコム3回転 後伸びが凄いので薄膜で小刻みに塗るのが吉', a: -0.05, ra: 0, k: 1 },
+  { n: 19, c: 'QD', t: 11, w: '晴れ', p: 0, u: 0, s: 80, l: 20, r: 1.30, m: 'めちゃ塗りやすく垂れづらい(と思ったら後垂れした)', a: -0.05, ra: 0, k: 1 },
+  { n: 20, c: 'QD', t: 12, w: '晴れ', p: 0, u: 0, s: 50, l: 50, r: 1.30, m: '伸びは少し悪いが垂れはしない', a: 0.15, ra: 0, k: 1 },
+  { n: 21, c: 'グリフィス', t: 11, w: '晴れ', p: 0, u: 0, s: 100, l: 0, r: 1.28, m: '塗りやすいがベース塗ってないところが少し溜まった もう少し番手早いほうがいい', a: -0.1, ra: 0, k: 1 },
+  { n: 22, c: 'QD', t: 9, w: '雨', p: 4, u: 0, s: 100, l: 0, r: 1.27, m: '塗りやすく垂れない WS400 2回転 3回転絞り', a: 0, ra: 0, k: 1 },
+  { n: 23, c: 'QD', t: 12, w: '晴れ', p: 0, u: 0, s: 100, l: 0, r: 1.28, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 24, c: 'GL', t: 19, w: '雨', p: 4, u: 50, s: 50, l: 0, r: 1.27, m: '塗りやすい ちょっと伸び過ぎかも', a: -0.05, ra: 0, k: 1 },
+  { n: 25, c: 'GL', t: 14, w: '雨', p: 4, u: 0, s: 100, l: 0, r: 1.27, m: 'ちょっと伸び過ぎかも', a: -0.1, ra: 0, k: 1 },
+  { n: 26, c: 'GL', t: 20, w: '晴れ', p: 0, u: 50, s: 50, l: 0, r: 1.27, m: 'ベストな配分', a: 0, ra: 0, k: 1.5 },
+  { n: 27, c: 'グリフィス', t: 20, w: '晴れ', p: 0, u: 50, s: 50, l: 0, r: 1.27, m: 'ベスト', a: 0, ra: 0, k: 1.5 },
+  { n: 28, c: 'QD', t: 24, w: '雨', p: 4, u: 50, s: 50, l: 0, r: 1.28, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 29, c: 'QD', t: 28, w: '晴れ', p: 0, u: 100, s: 0, l: 0, r: 1.30, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 30, c: 'GL', t: 22, w: '晴れ', p: 0, u: 60, s: 40, l: 0, r: 1.27, m: '少し伸びが悪い', a: 0.1, ra: 0, k: 1 },
+  { n: 31, c: 'SG', t: 30, w: '晴れ', p: 0, u: 100, s: 0, l: 0, r: 1.30, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 32, c: 'QD', t: 23, w: '雨', p: 4, u: 50, s: 50, l: 0, r: 1.28, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 33, c: 'GL', t: 34, w: '晴れ', p: 0, u: 100, s: 0, l: 0, r: 1.28, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 34, c: 'グリフィス', t: 38, w: '晴れ', p: 0, u: 100, s: 0, l: 0, r: 1.28, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 35, c: 'グリフィス', t: 30, w: '晴れ', p: 0, u: 100, s: 0, l: 0, r: 1.27, m: 'ぬりやすい', a: 0, ra: 0, k: 1 },
+  { n: 36, c: 'グリフィス', t: 23, w: '雨', p: 4, u: 55, s: 45, l: 0, r: 1.26, m: '', a: 0, ra: 0, k: 0.5 },
+  { n: 37, c: 'QD', t: 23, w: '曇り', p: 2, u: 50, s: 50, l: 0, r: 1.28, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 38, c: 'QD', t: 22, w: '曇り', p: 2, u: 45, s: 55, l: 0, r: 1.28, m: '塗りやすい', a: 0, ra: 0, k: 1 },
+  { n: 39, c: 'QD', t: 20, w: '雨曇り', p: 3, u: 35, s: 65, l: 0, r: 1.28, m: '塗りこんでも垂れない 塗りやすい', a: 0, ra: 0, k: 1 }
+];
+/* 計算に使う全記録(もとの記録 + 保存した記録) */
+let REC = BASE.slice();
+let T_MIN = 0, T_MAX = 0;
+function setUserRecords(list) {
+  REC = BASE.concat(list);
+  T_MIN = Math.min.apply(null, REC.map(function (r) { return r.t; }));
+  T_MAX = Math.max.apply(null, REC.map(function (r) { return r.t; }));
+}
+setUserRecords([]);
+
+/* 保存した1件(データベースの書類)を計算用の記録に直す。使えない書類は捨てる */
+function fromDoc(id, d) {
+  if (!d) return null;
+  const t = Number(d.t), u = Number(d.u), s = Number(d.s), l = Number(d.l), r = Number(d.r);
+  if (![t, u, s, l, r].every(isFinite) || u + s + l <= 0) return null;
+  if (!Object.prototype.hasOwnProperty.call(WX_ALL, d.w) || CLEARS.indexOf(d.c) < 0) return null;
+  const resName = Object.prototype.hasOwnProperty.call(RES, d.res) ? d.res : '塗りやすい';
+  const res = RES[resName];
+  return {
+    n: null, id: id, user: true, c: d.c, t: t, w: d.w, p: WX_ALL[d.w], u: u, s: s, l: l, r: r,
+    m: String(d.m || '').slice(0, 80), a: res.a, ra: 0, k: res.k, res: resName, ts: String(d.ts || '')
+  };
+}
+
+/* バックアップ: 追加した記録を文字(JSON)にする/文字から記録に戻す。読み込みは、すでにある記録と同じものを飛ばす */
+function recDoc(r) { return { c: r.c, t: r.t, w: r.w, u: r.u, s: r.s, l: r.l, r: r.r, m: r.m, res: r.res, ts: r.ts }; }
+function buildBackup(recs) {
+  return JSON.stringify({ app: 'thinner-mix', version: 1, exportedAt: new Date().toISOString(), records: recs.map(recDoc) }, null, 1);
+}
+function recKey(r) { return [r.ts, r.c, r.t, r.w, r.u, r.s, r.l, r.r].join('|'); }
+function parseBackup(text) {
+  var data;
+  try { data = JSON.parse(String(text).replace(/^﻿/, '').trim()); }
+  catch (e) { return { error: '読み込めませんでした。バックアップの内容が途中で切れていないか確認してください。' }; }
+  var arr = Array.isArray(data) ? data : (data && Array.isArray(data.records) ? data.records : null);
+  if (!arr) return { error: '記録のバックアップではないようです。このページで保存したファイルかテキストを選んでください。' };
+  var now = new Date().toISOString();
+  var recs = [], skipped = 0;
+  arr.slice(0, 2000).forEach(function (d) {
+    var r = (d && typeof d === 'object') ? fromDoc('i', Object.assign({}, d, { ts: d.ts || now })) : null;
+    if (r) recs.push(r); else skipped++;
+  });
+  if (arr.length > 2000) skipped += arr.length - 2000;
+  return { recs: recs, skipped: skipped };
+}
+function mergeNew(existing, incoming) {
+  var have = {};
+  existing.forEach(function (r) { have[recKey(r)] = true; });
+  var fresh = [];
+  incoming.forEach(function (r) { var k = recKey(r); if (!have[k]) { have[k] = true; fresh.push(r); } });
+  return { fresh: fresh, dup: incoming.length - fresh.length };
+}
+
+/* ダイヤルの番手の配合: スロー100 → スーパー100 → ウルトラ100 を5%刻みで41段 */
+const BLENDS = [];
+for (let i = 0; i <= 40; i++) {
+  let u = 0, s = 0, l = 0, label;
+  if (i < 20) { s = i * 5; l = 100 - s; label = s === 0 ? 'スロー 100' : 'スーパー ' + s + ' : スロー ' + l; }
+  else if (i === 20) { s = 100; label = 'スーパー 100'; }
+  else { u = (i - 20) * 5; s = 100 - u; label = u === 100 ? 'ウルトラ 100' : 'ウルトラ ' + u + ' : スーパー ' + s; }
+  BLENDS.push({ u: u, s: s, l: l, label: label });
+}
+function blendIndex(b) { return b.u > 0 ? 20 + b.u / 5 : b.s / 5; }
+
+function sPos(r) { return (2 * r.u + r.s) / (r.u + r.s + r.l); }
+
+function weigh(q, rec, hT, otherClear, decay) {
+  const dt = rec.t - q.t;
+  const wc = rec.c === q.c ? 1 : otherClear;
+  const ww = Math.pow(decay, Math.abs(rec.p - q.p));
+  return rec.k * wc * ww * Math.exp(-0.5 * (dt / hT) * (dt / hT));
+}
+
+function nearestByTemp(q, list) {
+  let best = list[0];
+  for (const r of list) if (Math.abs(r.t - q.t) < Math.abs(best.t - q.t)) best = r;
+  return best;
+}
+
+function targetS(q) {
+  let sw = 0, acc = 0;
+  for (const r of REC) {
+    const w = weigh(q, r, 2.0, 0.4, 0.7);
+    sw += w; acc += w * (sPos(r) + r.a);
+  }
+  const s = sw > 1e-9 ? acc / sw : sPos(nearestByTemp(q, REC)) + nearestByTemp(q, REC).a;
+  return Math.max(0, Math.min(2, s));
+}
+
+function targetR(q) {
+  const list = REC.filter(r => r.r != null);
+  let sw = 0, acc = 0;
+  for (const r of list) {
+    const w = weigh({ t: q.t, c: q.c, p: q.p }, r, 4, 0.25, 1);
+    sw += w; acc += w * (r.r + r.ra);
+  }
+  const v = sw > 1e-9 ? acc / sw : (() => { const n = nearestByTemp(q, list); return n.r + n.ra; })();
+  return Math.round(v * 100) / 100;
+}
+
+/* 5%刻みに丸め、10%未満の混ぜは計量できないので0にする */
+function toBlend(s) {
+  let u = 0, sp = 0, l = 0;
+  if (s > 1) {
+    u = Math.round((s - 1) * 20) * 5;
+    if (u < 10) u = 0;
+    if (u > 90) u = 100;
+    sp = 100 - u;
+  } else {
+    sp = Math.round(s * 20) * 5;
+    if (sp > 90) sp = 100;
+    if (sp < 10) sp = 0;
+    l = 100 - sp;
+  }
+  return { u, s: sp, l };
+}
+
+function predict(q) {
+  const s = targetS(q);
+  const blend = toBlend(s);
+  const ratio = targetR(q);
+  const near = REC.map(r => ({ rec: r, w: weigh(q, r, 2.0, 0.4, 0.7) }))
+    .filter(x => x.w > 1e-6).sort((a, b) => b.w - a.w).slice(0, 5).map(x => x.rec);
+  const same = REC.filter(r => r.c === q.c);
+  const sameGap = Math.min(...same.map(r => Math.abs(r.t - q.t)));
+  return {
+    s, blend, ratio,
+    pct: Math.round((ratio - 1) * 100),
+    pair: (s > 1 && blend.u > 0) ? ['u', 's'] : ['s', 'l'],
+    near, sameGap,
+    outside: q.t < T_MIN - 0.5 || q.t > T_MAX + 0.5
+  };
+}
+</script>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>シンナー配合計算</h1>
+    <p class="lead">気温・天気・クリヤーの種類を入れると、シンナーの番手の配合を出します。元になっているのは自分の塗装記録です(<span id="cnt">38</span>件)。</p>
+  </header>
+
+  <div class="main">
+    <form class="panel" id="form" onsubmit="return false">
+      <div>
+        <label class="lab" for="temp">気温(℃)</label>
+        <div class="stepper">
+          <button type="button" id="tMinus" aria-label="気温を1℃下げる">−</button>
+          <input class="num" id="temp" type="number" inputmode="decimal" step="1" min="-10" max="50" value="15">
+          <button type="button" id="tPlus" aria-label="気温を1℃上げる">+</button>
+        </div>
+      </div>
+      <fieldset>
+        <legend>天気</legend>
+        <div class="seg" id="wxSeg">
+          <label><input type="radio" name="wx" value="晴れ"><span>晴れ</span></label>
+          <label><input type="radio" name="wx" value="曇り"><span>曇り</span></label>
+          <label><input type="radio" name="wx" value="雨"><span>雨</span></label>
+          <label><input type="radio" name="wx" value="雪"><span>雪</span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>クリヤー</legend>
+        <div class="seg" id="clSeg">
+          <label><input type="radio" name="cl" value="GL"><span>GL</span></label>
+          <label><input type="radio" name="cl" value="QD"><span>QD</span></label>
+          <label><input type="radio" name="cl" value="SG"><span>SG</span></label>
+          <label><input type="radio" name="cl" value="グリフィス"><span>グリフィス</span></label>
+        </div>
+      </fieldset>
+    </form>
+
+    <section class="result" aria-live="polite">
+      <h2>おすすめの配合</h2>
+      <div class="pair" id="pair"></div>
+      <p class="ratio" id="ratioLine"></p>
+      <p class="sub" id="amountLine"></p>
+      <p class="warn" id="warn" hidden></p>
+      <div class="cupwrap"><svg id="cup" viewBox="0 0 290 276" role="img" aria-label="ミキシングカップの断面図"></svg></div>
+    </section>
+  </div>
+
+  <section class="section" id="add">
+    <h2>塗装記録を追加</h2>
+    <p class="note">塗ったときの条件と使った配合をダイヤルで選んで保存します。保存した記録は、上の計算にもすぐ使われます。</p>
+    <div class="panel">
+      <div class="dials">
+        <div class="dial" id="dT"><div class="cap">気温</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="気温"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
+        <div class="dial" id="dW"><div class="cap">天気</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="天気"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
+        <div class="dial" id="dC"><div class="cap">クリヤー</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="クリヤー"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
+        <div class="dial wide small" id="dB"><div class="cap">番手の配合</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="番手の配合"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
+        <div class="dial" id="dR"><div class="cap">割合</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="割合"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
+      </div>
+      <p class="hint">ダイヤルを上下になぞるか、見えている項目をタップして選びます。</p>
+      <fieldset>
+        <legend>仕上がり</legend>
+        <div class="seg" id="resSeg">
+          <label><input type="radio" name="res" value="ベスト"><span>ベスト</span></label>
+          <label><input type="radio" name="res" value="塗りやすい" checked><span>塗りやすい</span></label>
+          <label><input type="radio" name="res" value="伸びが悪い"><span>伸びが悪い</span></label>
+          <label><input type="radio" name="res" value="垂れ・溜まり"><span>垂れ・溜まり</span></label>
+          <label><input type="radio" name="res" value="伸び過ぎ"><span>伸び過ぎ</span></label>
+        </div>
+      </fieldset>
+      <div>
+        <label class="lab" for="memo">メモ(任意)</label>
+        <input class="txt" id="memo" type="text" maxlength="80" placeholder="例: ボンネット、薄膜で小刻みに">
+      </div>
+      <p class="preview" id="preview" aria-live="polite"></p>
+      <div class="btnrow">
+        <button type="button" class="btn primary" id="saveBtn" disabled>この記録を保存</button>
+        <button type="button" class="btn" id="fillBtn">計算結果をダイヤルに入れる</button>
+      </div>
+      <p class="msg" id="saveMsg" aria-live="polite"></p>
+    </div>
+
+    <h2>追加した記録</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>日付</th><th>仕上がり</th><th>クリヤー</th><th class="n">気温</th><th>天気</th><th>番手の配合</th><th class="n">割合</th><th>メモ</th><th></th></tr></thead>
+      <tbody id="userBody"><tr><td class="empty" colspan="9">追加した記録はまだありません。ダイヤルで選んで保存すると、ここに並びます。</td></tr></tbody>
+    </table></div>
+
+    <h2>バックアップ</h2>
+    <p class="note">追加した記録をファイルに保存しておくと、あとで戻せます。もとの38件はページに入っているので、保存されるのは追加した記録だけです。</p>
+    <div class="panel">
+      <div class="btnrow">
+        <button type="button" class="btn primary" id="bkSaveBtn">記録をファイルに保存</button>
+        <button type="button" class="btn" id="bkLoadBtn">ファイルから読み込む</button>
+        <input class="vh" type="file" id="bkFile" accept=".json,.txt,application/json,text/plain" tabindex="-1" aria-hidden="true">
+      </div>
+      <p class="msg" id="bkMsg" aria-live="polite"></p>
+      <details id="bkDet">
+        <summary>ファイルが使えないとき(テキストでコピー・貼り付け)</summary>
+        <div class="section">
+          <p class="note">「記録をテキストにする」を押すと、記録が文字になって下の枠に出ます。コピーして、メモやメールに貼って保管してください。戻すときは、保管した文字を枠に貼り付けて「貼り付けた内容を読み込む」を押します。</p>
+          <label class="lab" for="bkTa">バックアップのテキスト</label>
+          <textarea class="ta" id="bkTa" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+          <div class="btnrow">
+            <button type="button" class="btn" id="bkTextBtn">記録をテキストにする</button>
+            <button type="button" class="btn" id="bkPasteBtn">貼り付けた内容を読み込む</button>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>近い条件の記録</h2>
+    <p class="note">この配合のもとになった、条件が近い順の記録です。薄い文字は別のクリヤーの記録です。</p>
+    <div class="scroll"><table>
+      <thead><tr><th>クリヤー</th><th class="n">気温</th><th>天気</th><th>番手の配合</th><th class="n">割合</th><th>メモ</th></tr></thead>
+      <tbody id="nearBody"></tbody>
+    </table></div>
+  </section>
+
+  <section class="section">
+    <h2>気温と番手の関係</h2>
+    <div class="chartbox"><svg id="chart" viewBox="0 0 360 250" role="img" aria-label="気温ごとの番手の混ぜ具合を、記録の点と計算された目安の線で示したグラフ"></svg></div>
+    <div class="legend">
+      <span><i class="k-dot"></i>塗って良かった記録</span>
+      <span><i class="k-ring"></i>番手の調整が必要だった記録</span>
+      <span><i class="k-line"></i>選んだ条件の目安</span>
+      <span><i class="k-cur"></i>今の入力</span>
+    </div>
+    <p class="note">縦軸は番手の混ぜ具合です。目盛りの位置がそれぞれ100%で、その間は隣り合う2つの番手の混合です。濃い点は選んだクリヤーの記録です。</p>
+  </section>
+
+  <section class="section">
+    <details>
+      <summary>全記録(<span id="cnt2">38</span>件)と計算のしくみ</summary>
+      <div class="section">
+        <p class="note">同じクリヤー、近い気温、近い天気の記録ほど重く見て平均しています。メモに「伸びが悪い」「溜まる」「伸び過ぎ」などがある記録は、その分だけ番手の位置をずらして使っています。もとの38件の補正は、メモの内容から付けたものです。「伸びが悪い」は遅い番手(ウルトラ寄り)、「垂れる・溜まる・伸び過ぎ」は早い番手(スロー寄り)にずらしました。追加した記録は、保存時に選んだ仕上がりで同じようにずらします。数字は番手の位置で、スロー100が0、スーパー100が1、ウルトラ100が2です。</p>
+        <p class="note">記録のない気温は、いちばん近い記録をそのまま当てはめます。試し塗りで確認してください。</p>
+        <div class="scroll"><table>
+          <thead><tr><th class="n">#</th><th>クリヤー</th><th class="n">気温</th><th>天気</th><th class="n">ウルトラ</th><th class="n">スーパー</th><th class="n">スロー</th><th class="n">割合</th><th>補正</th><th>メモ</th></tr></thead>
+          <tbody id="allBody"></tbody>
+        </table></div>
+      </div>
+    </details>
+  </section>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var NAME = { u: 'ウルトラ', s: 'スーパー', l: 'スロー' };
+  var state = { t: 15, wx: '曇り', c: 'QD' };
+  var lastPred = null;
+  var userRecs = [];
+
+  try {
+    var saved = JSON.parse(localStorage.getItem('thinner-last') || 'null');
+    if (saved && isFinite(saved.t) && WX.hasOwnProperty(saved.wx) && CLEARS.indexOf(saved.c) >= 0) {
+      state = { t: saved.t, wx: saved.wx, c: saved.c };
+    }
+  } catch (e) {}
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (m) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]; });
+  }
+  function blendText(r) {
+    var parts = [];
+    if (r.u) parts.push('ウルトラ' + r.u);
+    if (r.s) parts.push('スーパー' + r.s);
+    if (r.l) parts.push('スロー' + r.l);
+    return parts.join(' / ');
+  }
+  function fmtR(v) { return v == null ? '—' : v.toFixed(2); }
+  function resBadge(name) {
+    var cls = name === 'ベスト' ? ' best' : (name === '塗りやすい' ? '' : ' fix');
+    return '<span class="res' + cls + '">' + esc(name) + '</span>';
+  }
+  function adjText(r) {
+    var a = r.a === 0 ? '' : (r.a > 0 ? '遅め寄り +' : '早め寄り −') + Math.abs(r.a).toFixed(2).replace(/0$/, '');
+    var b = r.ra === 0 ? '' : '割合 ' + r.ra.toFixed(2).replace('-', '−');
+    return [a, b].filter(Boolean).join('、') || '—';
+  }
+  function dateText(ts) {
+    var d = new Date(ts);
+    return isNaN(d.getTime()) ? '' : (d.getMonth() + 1) + '/' + d.getDate();
+  }
+
+  /* ---------- ダイヤル ---------- */
+  function makeWheel(root, items, onChange) {
+    var ITEM = 40;
+    var w = root.querySelector('.wheel');
+    w.innerHTML = '<div class="pad"></div>' + items.map(function (it, i) {
+      return '<div class="it" role="option" id="' + root.id + '-' + i + '" aria-selected="false">' + esc(it.l) + '</div>';
+    }).join('') + '<div class="pad"></div>';
+    var els = w.querySelectorAll('.it');
+    var cur = 0, shown = -1, timer = null, drag = null;
+    function clamp(i) { return Math.max(0, Math.min(items.length - 1, i)); }
+    function mark(i) {
+      if (i === shown) return;
+      if (shown >= 0) { els[shown].classList.remove('on'); els[shown].setAttribute('aria-selected', 'false'); }
+      shown = i;
+      els[i].classList.add('on');
+      els[i].setAttribute('aria-selected', 'true');
+      w.setAttribute('aria-activedescendant', els[i].id);
+    }
+    function go(i, smooth) {
+      i = clamp(i);
+      cur = i;
+      mark(i);
+      w.scrollTo({ top: i * ITEM, behavior: smooth ? 'smooth' : 'auto' });
+      onChange(items[i].v, i);
+    }
+    w.addEventListener('scroll', function () {
+      var i = clamp(Math.round(w.scrollTop / ITEM));
+      mark(i);
+      clearTimeout(timer);
+      timer = setTimeout(function () { if (i !== cur) { cur = i; onChange(items[i].v, i); } }, 90);
+    }, { passive: true });
+    w.addEventListener('click', function (e) {
+      if (drag && drag.moved) return;
+      var rect = w.getBoundingClientRect();
+      var i = Math.floor((e.clientY - rect.top + w.scrollTop - 60) / ITEM);
+      if (i >= 0 && i < items.length) go(i, true);
+    });
+    w.addEventListener('keydown', function (e) {
+      var d = 0;
+      if (e.key === 'ArrowDown') d = 1; else if (e.key === 'ArrowUp') d = -1;
+      else if (e.key === 'PageDown') d = 5; else if (e.key === 'PageUp') d = -5;
+      else if (e.key === 'Home') d = -1e6; else if (e.key === 'End') d = 1e6; else return;
+      e.preventDefault();
+      go(cur + d, true);
+    });
+    /* マウスでつかんで動かす(タッチは標準のスクロールを使う) */
+    w.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'mouse') return;
+      drag = { y: e.clientY, top: w.scrollTop, moved: false };
+      w.setPointerCapture(e.pointerId);
+      w.style.scrollSnapType = 'none';
+      w.style.cursor = 'grabbing';
+    });
+    w.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var dy = e.clientY - drag.y;
+      if (Math.abs(dy) > 4) drag.moved = true;
+      if (drag.moved) w.scrollTop = drag.top - dy;
+    });
+    function endDrag() {
+      if (!drag) return;
+      var moved = drag.moved;
+      w.style.scrollSnapType = '';
+      w.style.cursor = '';
+      if (moved) {
+        var i = clamp(Math.round(w.scrollTop / ITEM));
+        w.scrollTo({ top: i * ITEM, behavior: 'smooth' });
+        setTimeout(function () { drag = null; }, 0);
+      } else { drag = null; }
+    }
+    w.addEventListener('pointerup', endDrag);
+    w.addEventListener('pointercancel', endDrag);
+    return { set: function (i) { go(i, false); } };
+  }
+
+  var TEMPS = [], RATIOS = [];
+  for (var tt = -5; tt <= 45; tt++) TEMPS.push({ v: tt, l: tt + '℃' });
+  for (var rr = 120; rr <= 140; rr++) RATIOS.push({ v: rr / 100, l: (rr / 100).toFixed(2) });
+  var WXS = ['晴れ', '晴れ曇り', '曇り', '雨曇り', '雨', '雪'].map(function (x) { return { v: x, l: x }; });
+  var CLS = CLEARS.map(function (x) { return { v: x, l: x }; });
+  var BLS = BLENDS.map(function (b, i) { return { v: i, l: b.label }; });
+
+  var entry = { t: 15, w: '曇り', c: 'QD', bi: 20, ri: 8 };
+
+  function updatePreview() {
+    var b = BLENDS[entry.bi], r = RATIOS[entry.ri].v;
+    $('preview').innerHTML = esc(entry.c) + ' ・ ' + entry.t + '℃ ・ ' + esc(entry.w) + ' ・ ' + esc(b.label) +
+      ' ・ <span class="mono">割合 ' + r.toFixed(2) + '</span>(シンナー ' + Math.round((r - 1) * 100) + '%)';
+  }
+  var W = {
+    t: makeWheel($('dT'), TEMPS, function (v) { entry.t = v; updatePreview(); }),
+    w: makeWheel($('dW'), WXS, function (v) { entry.w = v; updatePreview(); }),
+    c: makeWheel($('dC'), CLS, function (v) { entry.c = v; updatePreview(); }),
+    b: makeWheel($('dB'), BLS, function (v) { entry.bi = v; updatePreview(); }),
+    r: makeWheel($('dR'), RATIOS, function (v, i) { entry.ri = i; updatePreview(); })
+  };
+  function fillFromCalc() {
+    if (!lastPred) return;
+    W.t.set(Math.max(0, Math.min(TEMPS.length - 1, Math.round(state.t) + 5)));
+    W.w.set(WXS.findIndex(function (x) { return x.v === state.wx; }));
+    W.c.set(CLEARS.indexOf(state.c));
+    W.b.set(blendIndex(lastPred.blend));
+    W.r.set(Math.max(0, Math.min(RATIOS.length - 1, Math.round(lastPred.ratio * 100) - 120)));
+  }
+
+  /* ---------- カップとグラフ ---------- */
+  function spread(items, minGap, hi) {
+    items.sort(function (a, b) { return a.y - b.y; });
+    for (var i = 1; i < items.length; i++) if (items[i].y - items[i - 1].y < minGap) items[i].y = items[i - 1].y + minGap;
+    var over = items[items.length - 1].y - hi;
+    if (over > 0) items.forEach(function (it) { it.y -= over; });
+    for (var j = items.length - 2; j >= 0; j--) if (items[j + 1].y - items[j].y < minGap) items[j].y = items[j + 1].y - minGap;
+  }
+
+  function drawCup(p, amounts) {
+    var X0 = 42, X1 = 128, BOT = 254;
+    var px = Math.min(170, 226 / p.ratio);
+    var out = '';
+    out += '<defs><clipPath id="cupclip"><path d="M42 22 V240 Q42 254 56 254 H114 Q128 254 128 240 V22 Z"/></clipPath></defs>';
+    var y = BOT, layers = [], items = [];
+    layers.push({ k: 'base', y: y - px, h: px, name: '主剤+硬化剤', val: '100' });
+    y -= px;
+    var thinH = px * (p.ratio - 1);
+    ['u', 's', 'l'].forEach(function (g) {
+      var share = p.blend[g] / 100;
+      if (share <= 0) return;
+      var h = thinH * share;
+      layers.push({ k: g, y: y - h, h: h, name: NAME[g], val: amounts[g].toFixed(1) });
+      y -= h;
+    });
+    out += '<g clip-path="url(#cupclip)">';
+    layers.forEach(function (L) { out += '<rect class="lay ' + L.k + '" x="' + X0 + '" y="' + L.y.toFixed(1) + '" width="' + (X1 - X0) + '" height="' + L.h.toFixed(1) + '"/>'; });
+    out += '</g>';
+    var maxUnit = Math.floor(p.ratio * 100 / 10) * 10;
+    for (var k = 10; k <= maxUnit; k += 10) {
+      var ty = BOT - px * k / 100;
+      out += '<line class="cup-tick" x1="' + X0 + '" x2="' + (X0 + (k % 20 === 0 ? 9 : 5)) + '" y1="' + ty.toFixed(1) + '" y2="' + ty.toFixed(1) + '"/>';
+      if (k % 20 === 0) out += '<text class="cup-lbl" x="' + (X0 - 5) + '" y="' + (ty + 3).toFixed(1) + '" text-anchor="end">' + k + '</text>';
+    }
+    out += '<path class="cup-out" d="M40 20 V240 Q40 256 56 256 H114 Q130 256 130 240 V20"/>';
+    layers.forEach(function (L) { items.push({ y: L.y + L.h / 2, mid: L.y + L.h / 2, name: L.name, val: L.val }); });
+    spread(items, 18, BOT);
+    items.forEach(function (it) {
+      out += '<path class="lead-line" d="M130 ' + it.mid.toFixed(1) + ' H141 L148 ' + it.y.toFixed(1) + ' H152"/>';
+      out += '<text class="t-name" x="156" y="' + (it.y + 4).toFixed(1) + '">' + esc(it.name) + '</text>';
+      out += '<text class="t-val" x="284" y="' + (it.y + 4).toFixed(1) + '">' + it.val + '</text>';
+    });
+    $('cup').innerHTML = out;
+  }
+
+  function drawChart(q, p) {
+    var Wd = 360, H = 250, L = 66, R = 14, T = 14, B = 34;
+    var x = function (t) { return L + (t - 5) / 35 * (Wd - L - R); };
+    var y = function (s) { return T + (2 - s) / 2 * (H - T - B); };
+    var o = '';
+    [[2, 'ウルトラ'], [1, 'スーパー'], [0, 'スロー']].forEach(function (g) {
+      o += '<line class="grid-l" x1="' + L + '" x2="' + (Wd - R) + '" y1="' + y(g[0]) + '" y2="' + y(g[0]) + '"/>';
+      o += '<text class="axis-g" x="' + (L - 8) + '" y="' + (y(g[0]) + 4) + '">' + g[1] + '</text>';
+    });
+    [0.5, 1.5].forEach(function (v) {
+      o += '<line class="grid-l" x1="' + L + '" x2="' + (Wd - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke-dasharray="2 4" opacity="0.6"/>';
+    });
+    for (var t = 5; t <= 40; t += 5) {
+      o += '<line class="grid-l" x1="' + x(t) + '" x2="' + x(t) + '" y1="' + (H - B) + '" y2="' + (H - B + 4) + '"/>';
+      o += '<text class="axis-t" x="' + x(t) + '" y="' + (H - B + 16) + '" text-anchor="middle">' + t + '</text>';
+    }
+    o += '<text class="axis-t" x="' + (Wd - R) + '" y="' + (H - 4) + '" text-anchor="end">気温 ℃</text>';
+    REC.forEach(function (r) {
+      if (r.t < 5 || r.t > 40) return;
+      var same = r.c === q.c;
+      o += '<circle class="pt' + (r.a !== 0 ? ' adj' : '') + '" cx="' + x(r.t).toFixed(1) + '" cy="' + y(sPos(r)).toFixed(1) + '" r="4" opacity="' + (same ? 0.85 : 0.28) + '"' + (r.a !== 0 ? '' : ' fill-opacity="0.6"') + '/>';
+    });
+    var d = '';
+    for (var tt2 = 5; tt2 <= 40; tt2++) {
+      var sv = targetS({ t: tt2, c: q.c, p: q.p });
+      d += (tt2 === 5 ? 'M' : 'L') + x(tt2).toFixed(1) + ' ' + y(sv).toFixed(1);
+    }
+    o += '<path class="curve" d="' + d + '"/>';
+    var cx = x(Math.max(5, Math.min(40, q.t)));
+    o += '<line class="cur-line" x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="' + T + '" y2="' + (H - B) + '"/>';
+    o += '<circle class="cur-pt" cx="' + cx.toFixed(1) + '" cy="' + y(p.s).toFixed(1) + '" r="6"/>';
+    $('chart').innerHTML = o;
+  }
+
+  /* ---------- 表示の更新 ---------- */
+  function render() {
+    var q = { t: state.t, c: state.c, p: WX[state.wx] };
+    var p = predict(q);
+    lastPred = p;
+    var pair = p.pair;
+    $('pair').innerHTML =
+      '<div class="g"><span class="gname"><i class="sw ' + pair[0] + '"></i>' + NAME[pair[0]] + '</span><span class="gnum">' + p.blend[pair[0]] + '</span></div>' +
+      '<div class="colon">:</div>' +
+      '<div class="g"><span class="gname"><i class="sw ' + pair[1] + '"></i>' + NAME[pair[1]] + '</span><span class="gnum">' + p.blend[pair[1]] + '</span></div>';
+    var thin = 100 * (p.ratio - 1);
+    var amounts = { u: thin * p.blend.u / 100, s: thin * p.blend.s / 100, l: thin * p.blend.l / 100 };
+    $('ratioLine').innerHTML = 'シンナー ' + p.pct + '% <small>(割合 ' + p.ratio.toFixed(2) + ')</small>';
+    var parts = [];
+    ['u', 's', 'l'].forEach(function (g) { if (p.blend[g] > 0) parts.push(NAME[g] + ' ' + amounts[g].toFixed(1)); });
+    $('amountLine').textContent = '主剤+硬化剤を100とすると、シンナーは ' + thin.toFixed(1) + '(' + parts.join('、') + ')';
+
+    var msgs = [];
+    if (p.outside) msgs.push('記録は' + T_MIN + '〜' + T_MAX + '℃の範囲です。この気温の記録はないので、いちばん近い記録を当てはめています。試し塗りで確認してください。');
+    if (p.sameGap > 4) msgs.push(state.c + 'の記録で' + state.t + '℃に近いものがありません。他のクリヤーの記録も参考にしています。');
+    var w = $('warn');
+    if (msgs.length) { w.textContent = msgs.join(' '); w.hidden = false; } else { w.hidden = true; }
+
+    drawCup(p, amounts);
+
+    $('nearBody').innerHTML = p.near.map(function (r) {
+      var cls = r.c === state.c ? '' : ' dim';
+      return '<tr><td class="' + cls.trim() + '">' + esc(r.c) + (r.user ? '<span class="tag">追加</span>' : '') + '</td><td class="n' + cls + '">' + r.t + '℃</td><td class="' + cls.trim() + '">' + esc(r.w) + '</td><td class="' + cls.trim() + '">' + esc(blendText(r)) + '</td><td class="n' + cls + '">' + fmtR(r.r) + '</td><td class="memo' + cls + '">' + esc(r.m || '(メモなし)') + '</td></tr>';
+    }).join('');
+
+    drawChart(q, p);
+    try { localStorage.setItem('thinner-last', JSON.stringify(state)); } catch (e) {}
+  }
+
+  function renderTables() {
+    var rows = BASE.map(function (r, i) {
+      var ratioCell = r.r == null ? '—' : (r.ra !== 0 ? fmtR(r.r) + ' → ' + fmtR(r.r + r.ra) : fmtR(r.r));
+      return '<tr><td class="n">' + (i + 1) + '</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(r.w) + '</td><td class="n">' + (r.u || '') + '</td><td class="n">' + (r.s || '') + '</td><td class="n">' + (r.l || '') + '</td><td class="n">' + ratioCell + '</td><td>' + esc(adjText(r)) + '</td><td class="memo">' + esc(r.m) + '</td></tr>';
+    });
+    userRecs.forEach(function (r) {
+      rows.push('<tr><td class="n">追加</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(r.w) + '</td><td class="n">' + (r.u || '') + '</td><td class="n">' + (r.s || '') + '</td><td class="n">' + (r.l || '') + '</td><td class="n">' + fmtR(r.r) + '</td><td>' + esc(r.res + ' ' + adjText(r)).replace(/ —$/, '') + '</td><td class="memo">' + esc(r.m) + '</td></tr>');
+    });
+    $('allBody').innerHTML = rows.join('');
+    $('cnt').textContent = REC.length;
+    $('cnt2').textContent = REC.length;
+
+    if (!userRecs.length) {
+      $('userBody').innerHTML = '<tr><td class="empty" colspan="9">追加した記録はまだありません。ダイヤルで選んで保存すると、ここに並びます。</td></tr>';
+    } else {
+      $('userBody').innerHTML = userRecs.slice().reverse().map(function (r) {
+        return '<tr><td class="n">' + esc(dateText(r.ts)) + '</td><td>' + resBadge(r.res) + '</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(r.w) + '</td><td>' + esc(blendText(r)) + '</td><td class="n">' + fmtR(r.r) + '</td><td class="memo">' + esc(r.m) + '</td><td><button type="button" class="btn small" data-id="' + esc(r.id) + '">削除</button></td></tr>';
+      }).join('');
+    }
+  }
+
+  /* ---------- 計算の入力 ---------- */
+  function syncInputs() {
+    $('temp').value = state.t;
+    document.querySelectorAll('input[name="wx"]').forEach(function (i) { i.checked = i.value === state.wx; });
+    document.querySelectorAll('input[name="cl"]').forEach(function (i) { i.checked = i.value === state.c; });
+  }
+  $('temp').addEventListener('input', function () {
+    var v = parseFloat(this.value);
+    if (isFinite(v)) { state.t = Math.max(-10, Math.min(50, v)); render(); }
+  });
+  $('tMinus').addEventListener('click', function () { state.t = Math.max(-10, state.t - 1); $('temp').value = state.t; render(); });
+  $('tPlus').addEventListener('click', function () { state.t = Math.min(50, state.t + 1); $('temp').value = state.t; render(); });
+  document.querySelectorAll('input[name="wx"]').forEach(function (i) { i.addEventListener('change', function () { if (i.checked) { state.wx = i.value; render(); } }); });
+  document.querySelectorAll('input[name="cl"]').forEach(function (i) { i.addEventListener('change', function () { if (i.checked) { state.c = i.value; render(); } }); });
+  $('fillBtn').addEventListener('click', fillFromCalc);
+
+  /* ---------- 記録の保存(データベース) ---------- */
+  var col = null, saving = false;
+  function setMsg(text, kind) { var m = $('saveMsg'); m.textContent = text; m.className = 'msg' + (kind ? ' ' + kind : ''); }
+  function errText(e) {
+    var c = e && e.code;
+    if (c === 'quota_exceeded') return '保存できる件数の上限に達しています。';
+    if (c === 'invalid_argument') return '保存できませんでした。この画面から書き込む権限がない可能性があります。';
+    if (c === 'revoked') return '保存できませんでした。ページを開き直してください。';
+    return '保存できませんでした。もう一度試してください。';
+  }
+  function dbOff() {
+    col = null;
+    $('saveBtn').disabled = true;
+    setMsg('保存機能に接続できませんでした。claude.ai にログインした状態で開き直してください。', 'err');
+  }
+  setMsg('保存機能に接続中…', '');
+  if (window.claude && window.claude.use) {
+    window.claude.use('db').then(function (db) {
+      if (!db) { dbOff(); return; }
+      col = db.collection('records');
+      $('saveBtn').disabled = false;
+      setMsg('', '');
+      col.onSnapshot(function (snap) {
+        var list = [];
+        snap.docs.forEach(function (d) {
+          var r = fromDoc(d.id, d.data());
+          if (r) list.push(r);
+        });
+        list.sort(function (a, b) { return a.ts < b.ts ? -1 : (a.ts > b.ts ? 1 : 0); });
+        userRecs = list;
+        setUserRecords(list);
+        renderTables();
+        render();
+      }, function () { setMsg('保存した記録を読み込めませんでした。ページを開き直してください。', 'err'); });
+    }).catch(dbOff);
+  } else {
+    dbOff();
+  }
+
+  $('saveBtn').addEventListener('click', function () {
+    if (!col || saving) return;
+    var b = BLENDS[entry.bi];
+    var res = document.querySelector('input[name="res"]:checked').value;
+    var doc = {
+      c: entry.c, t: entry.t, w: entry.w, u: b.u, s: b.s, l: b.l, r: RATIOS[entry.ri].v,
+      m: $('memo').value.trim().slice(0, 80), res: res, ts: new Date().toISOString()
+    };
+    saving = true;
+    $('saveBtn').disabled = true;
+    setMsg('保存中…', '');
+    col.add(doc).then(function () {
+      setMsg('保存しました。計算にも反映されています。', 'ok');
+      $('memo').value = '';
+    }).catch(function (e) {
+      setMsg(errText(e), 'err');
+    }).then(function () {
+      saving = false;
+      if (col) $('saveBtn').disabled = false;
+    });
+  });
+
+  $('userBody').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-id]');
+    if (!btn || !col) return;
+    if (btn.getAttribute('data-armed')) {
+      btn.disabled = true;
+      col.doc(btn.getAttribute('data-id')).delete().catch(function () {
+        btn.disabled = false;
+        setMsg('削除できませんでした。もう一度試してください。', 'err');
+      });
+    } else {
+      btn.setAttribute('data-armed', '1');
+      btn.textContent = '本当に削除';
+      setTimeout(function () {
+        if (btn.isConnected) { btn.removeAttribute('data-armed'); btn.textContent = '削除'; }
+      }, 3000);
+    }
+  });
+
+  /* ---------- バックアップ ---------- */
+  var downloadsNs = null, bkBusy = false;
+  function setBk(text, kind) { var m = $('bkMsg'); m.textContent = text; m.className = 'msg' + (kind ? ' ' + kind : ''); }
+  if (window.claude && window.claude.use) {
+    window.claude.use('downloads').then(function (d) {
+      downloadsNs = d || null;
+      if (!downloadsNs) $('bkDet').open = true;
+    }).catch(function () { $('bkDet').open = true; });
+  } else {
+    $('bkDet').open = true;
+  }
+  function ymd() {
+    var d = new Date();
+    return d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+  }
+  function importDone(p, m, added) {
+    var s = '読み込みました(' + added + '件)。';
+    if (m.dup) s += m.dup + '件は登録済みのため飛ばしました。';
+    if (p.skipped) s += p.skipped + '件は形式が合わず読み込めませんでした。';
+    setBk(s, 'ok');
+  }
+  function importRecords(text) {
+    if (bkBusy) return;
+    if (!col) { setBk('保存機能に接続できていません。claude.ai にログインした状態で開き直してください。', 'err'); return; }
+    var p = parseBackup(text);
+    if (p.error) { setBk(p.error, 'err'); return; }
+    var m = mergeNew(userRecs, p.recs);
+    if (!m.fresh.length) {
+      setBk(p.recs.length ? '新しい記録はありませんでした。すべて登録済みです。' : '読み込める記録がありませんでした。', p.recs.length ? 'ok' : 'err');
+      return;
+    }
+    var fresh = m.fresh.slice(0, 500);
+    if (m.fresh.length > 500) p.skipped += m.fresh.length - 500;
+    bkBusy = true;
+    setBk('読み込み中…', '');
+    var added = 0, chain = Promise.resolve();
+    fresh.forEach(function (r) {
+      chain = chain.then(function () { return col.add(recDoc(r)).then(function () { added++; }); });
+    });
+    chain.then(function () {
+      importDone(p, m, added);
+    }).catch(function (e) {
+      setBk(errText(e) + (added ? '(' + added + '件は読み込み済みです)' : ''), 'err');
+    }).then(function () { bkBusy = false; });
+  }
+
+  $('bkSaveBtn').addEventListener('click', function () {
+    if (!userRecs.length) { setBk('保存する記録がまだありません。', 'err'); return; }
+    if (!downloadsNs) {
+      $('bkDet').open = true;
+      setBk('この画面ではファイルを保存できません。下の「テキストでコピー・貼り付け」を使ってください。', 'err');
+      return;
+    }
+    setBk('', '');
+    downloadsNs.save({ filename: 'thinner-records-' + ymd() + '.json', data: buildBackup(userRecs) }).then(function () {
+      setBk('バックアップを保存しました(' + userRecs.length + '件)。ファイルは大切に保管してください。', 'ok');
+    }).catch(function (e) {
+      if (e && e.code === 'declined') { setBk('保存をやめました。', ''); return; }
+      $('bkDet').open = true;
+      setBk('ファイルを保存できませんでした。下の「テキストでコピー・貼り付け」を使ってください。', 'err');
+    });
+  });
+  $('bkLoadBtn').addEventListener('click', function () { $('bkFile').click(); });
+  $('bkFile').addEventListener('change', function () {
+    var input = this, f = input.files && input.files[0];
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { setBk('ファイルが大きすぎます。このページで保存したバックアップを選んでください。', 'err'); input.value = ''; return; }
+    var rd = new FileReader();
+    rd.onload = function () { importRecords(String(rd.result || '')); input.value = ''; };
+    rd.onerror = function () { setBk('ファイルを読み込めませんでした。', 'err'); input.value = ''; };
+    rd.readAsText(f);
+  });
+  $('bkTextBtn').addEventListener('click', function () {
+    if (!userRecs.length) { setBk('テキストにする記録がまだありません。', 'err'); return; }
+    var text = buildBackup(userRecs);
+    var ta = $('bkTa');
+    ta.value = text;
+    try { ta.focus(); ta.select(); ta.setSelectionRange(0, text.length); } catch (e) {}
+    var done = function (copied) {
+      setBk(copied ? 'テキストをコピーしました。メモやメールに貼って保管してください。' : '枠の中の文字を、全部コピーしてメモやメールに貼って保管してください。', copied ? 'ok' : '');
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      else done(false);
+    } catch (e) { done(false); }
+  });
+  $('bkPasteBtn').addEventListener('click', function () {
+    var text = $('bkTa').value.trim();
+    if (!text) { setBk('枠にバックアップのテキストを貼り付けてから押してください。', 'err'); return; }
+    importRecords(text);
+  });
+
+  syncInputs();
+  renderTables();
+  render();
+  fillFromCalc();
+})();
+</script>
+</body>
+</html>
