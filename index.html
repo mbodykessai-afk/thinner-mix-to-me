@@ -750,30 +750,43 @@ function predict(q) {
     for (var j = items.length - 2; j >= 0; j--) if (items[j + 1].y - items[j].y < minGap) items[j].y = items[j + 1].y - minGap;
   }
 
-  function drawCup(p, amounts) {
+  function drawCup(p, amounts, bg) {
     var X0 = 42, X1 = 128, BOT = 254;
     var px = Math.min(170, 226 / p.ratio);
     var out = '';
     out += '<defs><clipPath id="cupclip"><path d="M42 22 V240 Q42 254 56 254 H114 Q128 254 128 240 V22 Z"/></clipPath></defs>';
     var y = BOT, layers = [], items = [];
-    layers.push({ k: 'base', y: y - px, h: px, name: '主剤+硬化剤', val: '100' });
+    layers.push({ k: 'base', y: y - px, h: px, name: '主剤+硬化剤', val: bg > 0 ? fmtG(bg) + ' g' : '100' });
     y -= px;
     var thinH = px * (p.ratio - 1);
     ['u', 's', 'l'].forEach(function (g) {
       var share = p.blend[g] / 100;
       if (share <= 0) return;
       var h = thinH * share;
-      layers.push({ k: g, y: y - h, h: h, name: NAME[g], val: amounts[g].toFixed(1) });
+      layers.push({ k: g, y: y - h, h: h, name: NAME[g], val: bg > 0 ? fmtG(bg * (p.ratio - 1) * share) + ' g' : amounts[g].toFixed(1) });
       y -= h;
     });
     out += '<g clip-path="url(#cupclip)">';
     layers.forEach(function (L) { out += '<rect class="lay ' + L.k + '" x="' + X0 + '" y="' + L.y.toFixed(1) + '" width="' + (X1 - X0) + '" height="' + L.h.toFixed(1) + '"/>'; });
     out += '</g>';
+    if (bg > 0) {
+      /* g入力があるときは、目盛りをgで振る(間隔が20px以上になる切りのよい刻み) */
+      var steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000], stepG = steps[steps.length - 1];
+      for (var si = 0; si < steps.length; si++) { if (px * steps[si] / bg >= 20) { stepG = steps[si]; break; } }
+      var maxG = bg * p.ratio;
+      for (var gv = stepG; gv <= maxG + 1e-9; gv += stepG) {
+        var gy = BOT - px * gv / bg;
+        out += '<line class="cup-tick" x1="' + X0 + '" x2="' + (X0 + 9) + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '"/>';
+        out += '<text class="cup-lbl" x="' + (X0 - 5) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end">' + gv + '</text>';
+      }
+      out += '<text class="cup-lbl" x="' + (X0 - 5) + '" y="12" text-anchor="end">g</text>';
+    } else {
     var maxUnit = Math.floor(p.ratio * 100 / 10) * 10;
     for (var k = 10; k <= maxUnit; k += 10) {
       var ty = BOT - px * k / 100;
       out += '<line class="cup-tick" x1="' + X0 + '" x2="' + (X0 + (k % 20 === 0 ? 9 : 5)) + '" y1="' + ty.toFixed(1) + '" y2="' + ty.toFixed(1) + '"/>';
       if (k % 20 === 0) out += '<text class="cup-lbl" x="' + (X0 - 5) + '" y="' + (ty + 3).toFixed(1) + '" text-anchor="end">' + k + '</text>';
+    }
     }
     out += '<path class="cup-out" d="M40 20 V240 Q40 256 56 256 H114 Q130 256 130 240 V20"/>';
     layers.forEach(function (L) { items.push({ y: L.y + L.h / 2, mid: L.y + L.h / 2, name: L.name, val: L.val }); });
@@ -866,7 +879,7 @@ function predict(q) {
     var w = $('warn');
     if (msgs.length) { w.textContent = msgs.join(' '); w.hidden = false; } else { w.hidden = true; }
 
-    drawCup(p, amounts);
+    drawCup(p, amounts, bg);
 
     $('nearBody').innerHTML = p.near.map(function (r) {
       var cls = r.c === state.c ? '' : ' dim';
