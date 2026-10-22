@@ -166,6 +166,12 @@ legend, .lab { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color:
 .ratio { font-family: var(--font-num); font-size: 18px; font-weight: 600; }
 .ratio small { font-family: var(--font-body); font-weight: 400; color: var(--muted); font-size: 14px; }
 .sub { color: var(--muted); font-size: 14px; }
+.gramrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 2px; }
+.gramrow label { font-weight: 600; font-size: 14px; }
+.gin { display: inline-flex; align-items: center; gap: 6px; }
+.gin .txt { width: 110px; text-align: right; font-size: 16px; }
+.gramout { margin: 6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.6; }
+.gramout b { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
 .cupwrap { max-width: 320px; }
 .cupwrap svg { display: block; width: 100%; height: auto; }
@@ -482,6 +488,8 @@ function predict(q) {
       <h2>おすすめの配合</h2>
       <div class="pair" id="pair"></div>
       <p class="ratio" id="ratioLine"></p>
+      <div class="gramrow"><label for="baseG">主剤+硬化剤</label><span class="gin"><input class="txt" id="baseG" type="text" inputmode="decimal" autocomplete="off" placeholder="例: 300"><span>g</span></span></div>
+      <p class="gramout" id="gramLine" hidden></p>
       <p class="sub" id="amountLine"></p>
       <p class="warn" id="warn" hidden></p>
       <div class="cupwrap"><svg id="cup" viewBox="0 0 290 276" role="img" aria-label="ミキシングカップの断面図"></svg></div>
@@ -812,6 +820,20 @@ function predict(q) {
     $('chart').innerHTML = o;
   }
 
+  /* ---------- 主剤+硬化剤(g)の入力 ---------- */
+  var BASE_KEY = 'thinner-base-g';
+  function parseBaseG() {
+    var s = $('baseG').value.replace(/[０-９．]/g, function (c) { return c === '．' ? '.' : String.fromCharCode(c.charCodeAt(0) - 65248); }).replace(/,/g, '').trim();
+    var v = parseFloat(s);
+    return (isFinite(v) && v > 0 && v <= 100000) ? v : 0;
+  }
+  function fmtG(v) { return (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, ''); }
+  try { $('baseG').value = localStorage.getItem(BASE_KEY) || ''; } catch (e) {}
+  $('baseG').addEventListener('input', function () {
+    try { localStorage.setItem(BASE_KEY, $('baseG').value); } catch (e) {}
+    render();
+  });
+
   /* ---------- 表示の更新 ---------- */
   function render() {
     var q = { t: state.t, c: state.c, p: WX[state.wx] };
@@ -828,6 +850,15 @@ function predict(q) {
     var parts = [];
     ['u', 's', 'l'].forEach(function (g) { if (p.blend[g] > 0) parts.push(NAME[g] + ' ' + amounts[g].toFixed(1)); });
     $('amountLine').textContent = '主剤+硬化剤を100とすると、シンナーは ' + thin.toFixed(1) + '(' + parts.join('、') + ')';
+
+    var bg = parseBaseG();
+    var gl = $('gramLine');
+    if (bg > 0) {
+      var tg = bg * (p.ratio - 1), gp = [];
+      ['u', 's', 'l'].forEach(function (g) { if (p.blend[g] > 0) gp.push(NAME[g] + ' <b>' + fmtG(tg * p.blend[g] / 100) + '</b> g'); });
+      gl.innerHTML = '主剤+硬化剤 <b>' + fmtG(bg) + '</b> g に、シンナー合計 <b>' + fmtG(tg) + '</b> g<br>' + gp.join(' ＋ ');
+      gl.hidden = false;
+    } else { gl.hidden = true; }
 
     var msgs = [];
     if (p.outside) msgs.push('記録は' + T_MIN + '〜' + T_MAX + '℃の範囲です。この気温の記録はないので、いちばん近い記録を当てはめています。試し塗りで確認してください。');
