@@ -173,7 +173,7 @@ legend, .lab { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color:
 .gramout { margin: 6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.6; }
 .gramout b { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
-.cupwrap { max-width: 420px; }
+.cupwrap { max-width: 460px; }
 .cupwrap svg { display: block; width: 100%; height: auto; }
 .cup-out { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .cup-tick { stroke: var(--ink); stroke-width: 1; opacity: 0.45; }
@@ -181,9 +181,9 @@ legend, .lab { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color:
 .lay { stroke: var(--bg); stroke-width: 1; }
 .lay.base { fill: var(--base); } .lay.u { fill: var(--ultra); } .lay.s { fill: var(--super); } .lay.l { fill: var(--slow); }
 .lead-line { fill: none; stroke: var(--muted); stroke-width: 1; }
-.t-name { fill: var(--ink); font-size: 12px; font-weight: 700; font-family: var(--font-body); }
-.t-upto { fill: var(--muted); font-size: 10px; font-family: var(--font-num); text-anchor: end; }
-.t-val { fill: var(--ink); font-size: 12px; font-weight: 600; font-family: var(--font-num); text-anchor: end; }
+.t-name { fill: var(--ink); font-size: 14px; font-weight: 800; font-family: var(--font-body); }
+.t-upto { fill: var(--ink); opacity: .8; font-size: 12px; font-weight: 700; font-family: var(--font-num); text-anchor: end; }
+.t-val { fill: var(--ink); font-size: 14px; font-weight: 800; font-family: var(--font-num); text-anchor: end; }
 
 /* ダイヤル */
 .dials { display: grid; gap: 14px 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -493,7 +493,7 @@ function predict(q) {
       <p class="gramout" id="gramLine" hidden></p>
       <p class="sub" id="amountLine"></p>
       <p class="warn" id="warn" hidden></p>
-      <div class="cupwrap"><svg id="cup" viewBox="0 0 380 276" role="img" aria-label="ミキシングカップの断面図"></svg></div>
+      <div class="cupwrap"><svg id="cup" viewBox="0 0 414 276" role="img" aria-label="ミキシングカップの断面図"></svg></div>
     </section>
   </div>
 
@@ -781,7 +781,7 @@ function predict(q) {
         out += '<line class="cup-tick" x1="' + X0 + '" x2="' + (X0 + 9) + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '"/>';
         out += '<text class="cup-lbl" x="' + (X0 - 5) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end">' + gv + '</text>';
       }
-      out += '<text class="t-name" x="156" y="14">合計</text><text class="t-val" x="280" y="14">' + fmtG(maxG) + ' g</text>';
+      out += '<text class="t-name" x="156" y="14">合計</text><text class="t-val" x="302" y="14">' + fmtG(maxG) + ' g</text>';
     } else {
     var maxUnit = Math.floor(p.ratio * 100 / 10) * 10;
     for (var k = 10; k <= maxUnit; k += 10) {
@@ -796,8 +796,8 @@ function predict(q) {
     items.forEach(function (it) {
       out += '<path class="lead-line" d="M130 ' + it.mid.toFixed(1) + ' H141 L148 ' + it.y.toFixed(1) + ' H152"/>';
       out += '<text class="t-name" x="156" y="' + (it.y + 4).toFixed(1) + '">' + esc(it.name) + '</text>';
-      out += '<text class="t-val" x="280" y="' + (it.y + 4).toFixed(1) + '">' + it.val + '</text>' +
-        (it.upto ? '<text class="t-upto" x="376" y="' + (it.y + 4).toFixed(1) + '">(' + it.upto + ' gまで)</text>' : '');
+      out += '<text class="t-val" x="302" y="' + (it.y + 4).toFixed(1) + '">' + it.val + '</text>' +
+        (it.upto ? '<text class="t-upto" x="410" y="' + (it.y + 4).toFixed(1) + '">(' + it.upto + ' gまで)</text>' : '');
     });
     $('cup').innerHTML = out;
   }
