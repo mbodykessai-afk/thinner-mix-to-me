@@ -262,6 +262,11 @@ details[open] summary { margin-bottom: 10px; }
 /* 計算モデル(画面に依存しない部分)。番手の位置 s: スロー100=0、スーパー100=1、ウルトラ100=2 */
 const WX = { '晴れ': 0, '曇り': 2, '雨': 4, '雪': 3.6 };
 const WX_ALL = { '晴れ': 0, '晴れ曇り': 1, '曇り': 2, '雨曇り': 3, '雨': 4, '雪': 3.6 };
+/* 湿度(%)を、これまでの「天気の位置」と同じ物差しにする(晴れ≒45%、曇り≒67%、雨≒89%。1目盛り=湿度11%)。
+   湿度を入れた記録はその湿度で、天気だけの古い記録は天気の位置で比べる。 */
+const HUM0 = 45, HUMSTEP = 11;
+const hp = hum => (hum - HUM0) / HUMSTEP;
+const humText = r => (r.h != null ? Math.round(r.h) + '%' : (r.w || '—'));
 const CLEARS = ['GL', 'QD', 'SG', 'グリフィス'];
 /* 記録の仕上がりを、計算に使う番手の補正(a)と重み(k)に直す */
 const RES = {
@@ -328,21 +333,30 @@ function fromDoc(id, d) {
   if (!d) return null;
   const t = Number(d.t), u = Number(d.u), s = Number(d.s), l = Number(d.l), r = Number(d.r);
   if (![t, u, s, l, r].every(isFinite) || u + s + l <= 0) return null;
-  if (!Object.prototype.hasOwnProperty.call(WX_ALL, d.w) || CLEARS.indexOf(d.c) < 0) return null;
+  const hum = (d.h === null || d.h === undefined || d.h === '') ? NaN : Number(d.h);
+  const hasH = isFinite(hum) && hum >= 0 && hum <= 100;
+  const hasW = Object.prototype.hasOwnProperty.call(WX_ALL, d.w);
+  if (!(hasH || hasW) || CLEARS.indexOf(d.c) < 0) return null;
   const resName = Object.prototype.hasOwnProperty.call(RES, d.res) ? d.res : '塗りやすい';
   const res = RES[resName];
   return {
-    n: null, id: id, user: true, c: d.c, t: t, w: d.w, p: WX_ALL[d.w], u: u, s: s, l: l, r: r,
+    n: null, id: id, user: true, c: d.c, t: t, h: hasH ? hum : null, w: hasW ? d.w : null, p: hasH ? hp(hum) : WX_ALL[d.w], u: u, s: s, l: l, r: r,
     m: String(d.m || '').slice(0, 80), a: res.a, ra: 0, k: res.k, res: resName, ts: String(d.ts || '')
   };
 }
 
 /* バックアップ: 追加した記録を文字(JSON)にする/文字から記録に戻す。読み込みは、すでにある記録と同じものを飛ばす */
-function recDoc(r) { return { c: r.c, t: r.t, w: r.w, u: r.u, s: r.s, l: r.l, r: r.r, m: r.m, res: r.res, ts: r.ts }; }
+function recDoc(r) {
+  var d = { c: r.c, t: r.t };
+  if (r.h != null) d.h = r.h;
+  if (r.w) d.w = r.w;
+  d.u = r.u; d.s = r.s; d.l = r.l; d.r = r.r; d.m = r.m; d.res = r.res; d.ts = r.ts;
+  return d;
+}
 function buildBackup(recs) {
   return JSON.stringify({ app: 'thinner-mix', version: 1, exportedAt: new Date().toISOString(), records: recs.map(recDoc) }, null, 1);
 }
-function recKey(r) { return [r.ts, r.c, r.t, r.w, r.u, r.s, r.l, r.r].join('|'); }
+function recKey(r) { return [r.ts, r.c, r.t, r.h, r.w, r.u, r.s, r.l, r.r].join('|'); }
 function parseBackup(text) {
   var data;
   try { data = JSON.parse(String(text).replace(/^﻿/, '').trim()); }
@@ -452,7 +466,7 @@ function predict(q) {
 <div class="page">
   <header>
     <h1>シンナー配合計算</h1>
-    <p class="lead">気温・天気・クリヤーの種類を入れると、シンナーの番手の配合を出します。元になっているのは自分の塗装記録です(<span id="cnt">38</span>件)。</p>
+    <p class="lead">気温・湿度・クリヤーの種類を入れると、シンナーの番手の配合を出します。元になっているのは自分の塗装記録です(<span id="cnt">38</span>件)。</p>
   </header>
 
   <div class="main">
@@ -465,15 +479,14 @@ function predict(q) {
           <button type="button" id="tPlus" aria-label="気温を1℃上げる">+</button>
         </div>
       </div>
-      <fieldset>
-        <legend>天気</legend>
-        <div class="seg" id="wxSeg">
-          <label><input type="radio" name="wx" value="晴れ"><span>晴れ</span></label>
-          <label><input type="radio" name="wx" value="曇り"><span>曇り</span></label>
-          <label><input type="radio" name="wx" value="雨"><span>雨</span></label>
-          <label><input type="radio" name="wx" value="雪"><span>雪</span></label>
+      <div>
+        <label class="lab" for="hum">湿度(%)</label>
+        <div class="stepper">
+          <button type="button" id="hMinus" aria-label="湿度を1%下げる">−</button>
+          <input class="num" id="hum" type="number" inputmode="decimal" step="1" min="0" max="100" value="65">
+          <button type="button" id="hPlus" aria-label="湿度を1%上げる">+</button>
         </div>
-      </fieldset>
+      </div>
       <fieldset>
         <legend>クリヤー</legend>
         <div class="seg" id="clSeg">
@@ -503,7 +516,7 @@ function predict(q) {
     <div class="panel">
       <div class="dials">
         <div class="dial" id="dT"><div class="cap">気温</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="気温"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
-        <div class="dial" id="dW"><div class="cap">天気</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="天気"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
+        <div class="dial" id="dW"><div class="cap">湿度</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="湿度"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
         <div class="dial" id="dC"><div class="cap">クリヤー</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="クリヤー"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
         <div class="dial wide small" id="dB"><div class="cap">番手の配合</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="番手の配合"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
         <div class="dial" id="dR"><div class="cap">割合</div><div class="box"><div class="wheel" tabindex="0" role="listbox" aria-label="割合"></div><div class="band"></div><div class="fade top"></div><div class="fade bot"></div></div></div>
@@ -533,7 +546,7 @@ function predict(q) {
 
     <h2>追加した記録</h2>
     <div class="scroll"><table>
-      <thead><tr><th>日付</th><th>仕上がり</th><th>クリヤー</th><th class="n">気温</th><th>天気</th><th>番手の配合</th><th class="n">割合</th><th>メモ</th><th></th></tr></thead>
+      <thead><tr><th>日付</th><th>仕上がり</th><th>クリヤー</th><th class="n">気温</th><th>湿度・天気</th><th>番手の配合</th><th class="n">割合</th><th>メモ</th><th></th></tr></thead>
       <tbody id="userBody"><tr><td class="empty" colspan="9">追加した記録はまだありません。ダイヤルで選んで保存すると、ここに並びます。</td></tr></tbody>
     </table></div>
 
@@ -565,7 +578,7 @@ function predict(q) {
     <h2>近い条件の記録</h2>
     <p class="note">この配合のもとになった、条件が近い順の記録です。薄い文字は別のクリヤーの記録です。</p>
     <div class="scroll"><table>
-      <thead><tr><th>クリヤー</th><th class="n">気温</th><th>天気</th><th>番手の配合</th><th class="n">割合</th><th>メモ</th></tr></thead>
+      <thead><tr><th>クリヤー</th><th class="n">気温</th><th>湿度・天気</th><th>番手の配合</th><th class="n">割合</th><th>メモ</th></tr></thead>
       <tbody id="nearBody"></tbody>
     </table></div>
   </section>
@@ -586,10 +599,10 @@ function predict(q) {
     <details>
       <summary>全記録(<span id="cnt2">38</span>件)と計算のしくみ</summary>
       <div class="section">
-        <p class="note">同じクリヤー、近い気温、近い天気の記録ほど重く見て平均しています。メモに「伸びが悪い」「溜まる」「伸び過ぎ」などがある記録は、その分だけ番手の位置をずらして使っています。もとの38件の補正は、メモの内容から付けたものです。「伸びが悪い」は遅い番手(ウルトラ寄り)、「垂れる・溜まる・伸び過ぎ」は早い番手(スロー寄り)にずらしました。追加した記録は、保存時に選んだ仕上がりで同じようにずらします。数字は番手の位置で、スロー100が0、スーパー100が1、ウルトラ100が2です。</p>
+        <p class="note">同じクリヤー、近い気温、近い湿度の記録ほど重く見て平均しています。湿度を入れる前の記録(天気だけ書いてあるもの)は残してあり、晴れ≒湿度45%、曇り≒67%、雨≒89%に置き換えて、同じように計算に使っています。メモに「伸びが悪い」「溜まる」「伸び過ぎ」などがある記録は、その分だけ番手の位置をずらして使っています。もとの38件の補正は、メモの内容から付けたものです。「伸びが悪い」は遅い番手(ウルトラ寄り)、「垂れる・溜まる・伸び過ぎ」は早い番手(スロー寄り)にずらしました。追加した記録は、保存時に選んだ仕上がりで同じようにずらします。数字は番手の位置で、スロー100が0、スーパー100が1、ウルトラ100が2です。</p>
         <p class="note">記録のない気温は、いちばん近い記録をそのまま当てはめます。試し塗りで確認してください。</p>
         <div class="scroll"><table>
-          <thead><tr><th class="n">#</th><th>クリヤー</th><th class="n">気温</th><th>天気</th><th class="n">ウルトラ</th><th class="n">スーパー</th><th class="n">スロー</th><th class="n">割合</th><th>補正</th><th>メモ</th></tr></thead>
+          <thead><tr><th class="n">#</th><th>クリヤー</th><th class="n">気温</th><th>湿度・天気</th><th class="n">ウルトラ</th><th class="n">スーパー</th><th class="n">スロー</th><th class="n">割合</th><th>補正</th><th>メモ</th></tr></thead>
           <tbody id="allBody"></tbody>
         </table></div>
       </div>
@@ -601,14 +614,15 @@ function predict(q) {
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var NAME = { u: 'ウルトラ', s: 'スーパー', l: 'スロー' };
-  var state = { t: 15, wx: '曇り', c: 'QD' };
+  var state = { t: 15, h: 65, c: 'QD' };
   var lastPred = null;
   var userRecs = [];
 
   try {
     var saved = JSON.parse(localStorage.getItem('thinner-last') || 'null');
-    if (saved && isFinite(saved.t) && WX.hasOwnProperty(saved.wx) && CLEARS.indexOf(saved.c) >= 0) {
-      state = { t: saved.t, wx: saved.wx, c: saved.c };
+    if (saved && isFinite(saved.t) && CLEARS.indexOf(saved.c) >= 0) {
+      var sh = isFinite(saved.h) ? saved.h : (WX.hasOwnProperty(saved.wx) ? Math.round(HUM0 + WX[saved.wx] * HUMSTEP) : 65);
+      state = { t: saved.t, h: Math.max(0, Math.min(100, sh)), c: saved.c };
     }
   } catch (e) {}
 
@@ -715,20 +729,21 @@ function predict(q) {
   var TEMPS = [], RATIOS = [];
   for (var tt = -5; tt <= 45; tt++) TEMPS.push({ v: tt, l: tt + '℃' });
   for (var rr = 120; rr <= 140; rr++) RATIOS.push({ v: rr / 100, l: (rr / 100).toFixed(2) });
-  var WXS = ['晴れ', '晴れ曇り', '曇り', '雨曇り', '雨', '雪'].map(function (x) { return { v: x, l: x }; });
+  var HUMS = [];
+  for (var hh = 20; hh <= 100; hh++) HUMS.push({ v: hh, l: hh + '%' });
   var CLS = CLEARS.map(function (x) { return { v: x, l: x }; });
   var BLS = BLENDS.map(function (b, i) { return { v: i, l: b.label }; });
 
-  var entry = { t: 15, w: '曇り', c: 'QD', bi: 20, ri: 8 };
+  var entry = { t: 15, h: 65, c: 'QD', bi: 20, ri: 8 };
 
   function updatePreview() {
     var b = BLENDS[entry.bi], r = RATIOS[entry.ri].v;
-    $('preview').innerHTML = esc(entry.c) + ' ・ ' + entry.t + '℃ ・ ' + esc(entry.w) + ' ・ ' + esc(b.label) +
+    $('preview').innerHTML = esc(entry.c) + ' ・ ' + entry.t + '℃ ・ ' + '湿度' + entry.h + '% ・ ' + esc(b.label) +
       ' ・ <span class="mono">割合 ' + r.toFixed(2) + '</span>(シンナー ' + Math.round((r - 1) * 100) + '%)';
   }
   var W = {
     t: makeWheel($('dT'), TEMPS, function (v) { entry.t = v; updatePreview(); }),
-    w: makeWheel($('dW'), WXS, function (v) { entry.w = v; updatePreview(); }),
+    h: makeWheel($('dW'), HUMS, function (v) { entry.h = v; updatePreview(); }),
     c: makeWheel($('dC'), CLS, function (v) { entry.c = v; updatePreview(); }),
     b: makeWheel($('dB'), BLS, function (v) { entry.bi = v; updatePreview(); }),
     r: makeWheel($('dR'), RATIOS, function (v, i) { entry.ri = i; updatePreview(); })
@@ -736,7 +751,7 @@ function predict(q) {
   function fillFromCalc() {
     if (!lastPred) return;
     W.t.set(Math.max(0, Math.min(TEMPS.length - 1, Math.round(state.t) + 5)));
-    W.w.set(WXS.findIndex(function (x) { return x.v === state.wx; }));
+    W.h.set(Math.max(0, Math.min(HUMS.length - 1, Math.round(state.h) - 20)));
     W.c.set(CLEARS.indexOf(state.c));
     W.b.set(blendIndex(lastPred.blend));
     W.r.set(Math.max(0, Math.min(RATIOS.length - 1, Math.round(lastPred.ratio * 100) - 120)));
@@ -852,7 +867,7 @@ function predict(q) {
 
   /* ---------- 表示の更新 ---------- */
   function render() {
-    var q = { t: state.t, c: state.c, p: WX[state.wx] };
+    var q = { t: state.t, c: state.c, p: hp(state.h) };
     var p = predict(q);
     lastPred = p;
     var pair = p.pair;
@@ -886,7 +901,7 @@ function predict(q) {
 
     $('nearBody').innerHTML = p.near.map(function (r) {
       var cls = r.c === state.c ? '' : ' dim';
-      return '<tr><td class="' + cls.trim() + '">' + esc(r.c) + (r.user ? '<span class="tag">追加</span>' : '') + '</td><td class="n' + cls + '">' + r.t + '℃</td><td class="' + cls.trim() + '">' + esc(r.w) + '</td><td class="' + cls.trim() + '">' + esc(blendText(r)) + '</td><td class="n' + cls + '">' + fmtR(r.r) + '</td><td class="memo' + cls + '">' + esc(r.m || '(メモなし)') + '</td></tr>';
+      return '<tr><td class="' + cls.trim() + '">' + esc(r.c) + (r.user ? '<span class="tag">追加</span>' : '') + '</td><td class="n' + cls + '">' + r.t + '℃</td><td class="' + cls.trim() + '">' + esc(humText(r)) + '</td><td class="' + cls.trim() + '">' + esc(blendText(r)) + '</td><td class="n' + cls + '">' + fmtR(r.r) + '</td><td class="memo' + cls + '">' + esc(r.m || '(メモなし)') + '</td></tr>';
     }).join('');
 
     drawChart(q, p);
@@ -896,10 +911,10 @@ function predict(q) {
   function renderTables() {
     var rows = BASE.map(function (r, i) {
       var ratioCell = r.r == null ? '—' : (r.ra !== 0 ? fmtR(r.r) + ' → ' + fmtR(r.r + r.ra) : fmtR(r.r));
-      return '<tr><td class="n">' + (i + 1) + '</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(r.w) + '</td><td class="n">' + (r.u || '') + '</td><td class="n">' + (r.s || '') + '</td><td class="n">' + (r.l || '') + '</td><td class="n">' + ratioCell + '</td><td>' + esc(adjText(r)) + '</td><td class="memo">' + esc(r.m) + '</td></tr>';
+      return '<tr><td class="n">' + (i + 1) + '</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(humText(r)) + '</td><td class="n">' + (r.u || '') + '</td><td class="n">' + (r.s || '') + '</td><td class="n">' + (r.l || '') + '</td><td class="n">' + ratioCell + '</td><td>' + esc(adjText(r)) + '</td><td class="memo">' + esc(r.m) + '</td></tr>';
     });
     userRecs.forEach(function (r) {
-      rows.push('<tr><td class="n">追加</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(r.w) + '</td><td class="n">' + (r.u || '') + '</td><td class="n">' + (r.s || '') + '</td><td class="n">' + (r.l || '') + '</td><td class="n">' + fmtR(r.r) + '</td><td>' + esc(r.res + ' ' + adjText(r)).replace(/ —$/, '') + '</td><td class="memo">' + esc(r.m) + '</td></tr>');
+      rows.push('<tr><td class="n">追加</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(humText(r)) + '</td><td class="n">' + (r.u || '') + '</td><td class="n">' + (r.s || '') + '</td><td class="n">' + (r.l || '') + '</td><td class="n">' + fmtR(r.r) + '</td><td>' + esc(r.res + ' ' + adjText(r)).replace(/ —$/, '') + '</td><td class="memo">' + esc(r.m) + '</td></tr>');
     });
     $('allBody').innerHTML = rows.join('');
     $('cnt').textContent = REC.length;
@@ -909,7 +924,7 @@ function predict(q) {
       $('userBody').innerHTML = '<tr><td class="empty" colspan="9">追加した記録はまだありません。ダイヤルで選んで保存すると、ここに並びます。</td></tr>';
     } else {
       $('userBody').innerHTML = userRecs.slice().reverse().map(function (r) {
-        return '<tr><td class="n">' + esc(dateText(r.ts)) + '</td><td>' + resBadge(r.res) + '</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(r.w) + '</td><td>' + esc(blendText(r)) + '</td><td class="n">' + fmtR(r.r) + '</td><td class="memo">' + esc(r.m) + '</td><td><button type="button" class="btn small" data-id="' + esc(r.id) + '">削除</button></td></tr>';
+        return '<tr><td class="n">' + esc(dateText(r.ts)) + '</td><td>' + resBadge(r.res) + '</td><td>' + esc(r.c) + '</td><td class="n">' + r.t + '℃</td><td>' + esc(humText(r)) + '</td><td>' + esc(blendText(r)) + '</td><td class="n">' + fmtR(r.r) + '</td><td class="memo">' + esc(r.m) + '</td><td><button type="button" class="btn small" data-id="' + esc(r.id) + '">削除</button></td></tr>';
       }).join('');
     }
   }
@@ -917,7 +932,7 @@ function predict(q) {
   /* ---------- 計算の入力 ---------- */
   function syncInputs() {
     $('temp').value = state.t;
-    document.querySelectorAll('input[name="wx"]').forEach(function (i) { i.checked = i.value === state.wx; });
+    $('hum').value = state.h;
     document.querySelectorAll('input[name="cl"]').forEach(function (i) { i.checked = i.value === state.c; });
   }
   $('temp').addEventListener('input', function () {
@@ -926,7 +941,12 @@ function predict(q) {
   });
   $('tMinus').addEventListener('click', function () { state.t = Math.max(-10, state.t - 1); $('temp').value = state.t; render(); });
   $('tPlus').addEventListener('click', function () { state.t = Math.min(50, state.t + 1); $('temp').value = state.t; render(); });
-  document.querySelectorAll('input[name="wx"]').forEach(function (i) { i.addEventListener('change', function () { if (i.checked) { state.wx = i.value; render(); } }); });
+  $('hum').addEventListener('input', function () {
+    var v = parseFloat(this.value);
+    if (isFinite(v)) { state.h = Math.max(0, Math.min(100, v)); render(); }
+  });
+  $('hMinus').addEventListener('click', function () { state.h = Math.max(0, Math.round(state.h) - 1); $('hum').value = state.h; render(); });
+  $('hPlus').addEventListener('click', function () { state.h = Math.min(100, Math.round(state.h) + 1); $('hum').value = state.h; render(); });
   document.querySelectorAll('input[name="cl"]').forEach(function (i) { i.addEventListener('change', function () { if (i.checked) { state.c = i.value; render(); } }); });
   $('fillBtn').addEventListener('click', fillFromCalc);
 
@@ -974,7 +994,7 @@ function predict(q) {
     var b = BLENDS[entry.bi];
     var res = document.querySelector('input[name="res"]:checked').value;
     var doc = {
-      c: entry.c, t: entry.t, w: entry.w, u: b.u, s: b.s, l: b.l, r: RATIOS[entry.ri].v,
+      c: entry.c, t: entry.t, h: entry.h, u: b.u, s: b.s, l: b.l, r: RATIOS[entry.ri].v,
       m: $('memo').value.trim().slice(0, 80), res: res, ts: new Date().toISOString()
     };
     saving = true;
