@@ -779,7 +779,7 @@ function predict(q) {
         out += '<line class="cup-tick" x1="' + X0 + '" x2="' + (X0 + 9) + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '"/>';
         out += '<text class="cup-lbl" x="' + (X0 - 5) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end">' + gv + '</text>';
       }
-      out += '<text class="cup-lbl" x="' + (X0 - 5) + '" y="12" text-anchor="end">g</text>';
+      out += '<text class="t-name" x="156" y="14">合計</text><text class="t-val" x="284" y="14">' + fmtG(maxG) + ' g</text>';
     } else {
     var maxUnit = Math.floor(p.ratio * 100 / 10) * 10;
     for (var k = 10; k <= maxUnit; k += 10) {
