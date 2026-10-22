@@ -173,7 +173,7 @@ legend, .lab { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color:
 .gramout { margin: 6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.6; }
 .gramout b { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
-.cupwrap { max-width: 320px; }
+.cupwrap { max-width: 420px; }
 .cupwrap svg { display: block; width: 100%; height: auto; }
 .cup-out { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .cup-tick { stroke: var(--ink); stroke-width: 1; opacity: 0.45; }
@@ -182,6 +182,7 @@ legend, .lab { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color:
 .lay.base { fill: var(--base); } .lay.u { fill: var(--ultra); } .lay.s { fill: var(--super); } .lay.l { fill: var(--slow); }
 .lead-line { fill: none; stroke: var(--muted); stroke-width: 1; }
 .t-name { fill: var(--ink); font-size: 12px; font-weight: 700; font-family: var(--font-body); }
+.t-upto { fill: var(--muted); font-size: 10px; font-family: var(--font-num); text-anchor: end; }
 .t-val { fill: var(--ink); font-size: 12px; font-weight: 600; font-family: var(--font-num); text-anchor: end; }
 
 /* ダイヤル */
@@ -492,7 +493,7 @@ function predict(q) {
       <p class="gramout" id="gramLine" hidden></p>
       <p class="sub" id="amountLine"></p>
       <p class="warn" id="warn" hidden></p>
-      <div class="cupwrap"><svg id="cup" viewBox="0 0 290 276" role="img" aria-label="ミキシングカップの断面図"></svg></div>
+      <div class="cupwrap"><svg id="cup" viewBox="0 0 380 276" role="img" aria-label="ミキシングカップの断面図"></svg></div>
     </section>
   </div>
 
@@ -758,12 +759,13 @@ function predict(q) {
     var y = BOT, layers = [], items = [];
     layers.push({ k: 'base', y: y - px, h: px, name: '主剤+硬化剤', val: bg > 0 ? fmtG(bg) + ' g' : '100' });
     y -= px;
-    var thinH = px * (p.ratio - 1);
-    ['u', 's', 'l'].forEach(function (g) {
+    var thinH = px * (p.ratio - 1), cum = bg > 0 ? bg : 0;
+    /* 下から スロー → スーパー → ウルトラ の順に重ねる(番手の遅いものが上) */
+    ['l', 's', 'u'].forEach(function (g) {
       var share = p.blend[g] / 100;
       if (share <= 0) return;
       var h = thinH * share;
-      layers.push({ k: g, y: y - h, h: h, name: NAME[g], val: bg > 0 ? fmtG(bg * (p.ratio - 1) * share) + ' g' : amounts[g].toFixed(1) });
+      layers.push({ k: g, y: y - h, h: h, name: NAME[g], val: bg > 0 ? fmtG(bg * (p.ratio - 1) * share) + ' g' : amounts[g].toFixed(1), upto: bg > 0 ? fmtG(cum += bg * (p.ratio - 1) * share) : '' });
       y -= h;
     });
     out += '<g clip-path="url(#cupclip)">';
@@ -779,7 +781,7 @@ function predict(q) {
         out += '<line class="cup-tick" x1="' + X0 + '" x2="' + (X0 + 9) + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '"/>';
         out += '<text class="cup-lbl" x="' + (X0 - 5) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end">' + gv + '</text>';
       }
-      out += '<text class="t-name" x="156" y="14">合計</text><text class="t-val" x="284" y="14">' + fmtG(maxG) + ' g</text>';
+      out += '<text class="t-name" x="156" y="14">合計</text><text class="t-val" x="280" y="14">' + fmtG(maxG) + ' g</text>';
     } else {
     var maxUnit = Math.floor(p.ratio * 100 / 10) * 10;
     for (var k = 10; k <= maxUnit; k += 10) {
@@ -789,12 +791,13 @@ function predict(q) {
     }
     }
     out += '<path class="cup-out" d="M40 20 V240 Q40 256 56 256 H114 Q130 256 130 240 V20"/>';
-    layers.forEach(function (L) { items.push({ y: L.y + L.h / 2, mid: L.y + L.h / 2, name: L.name, val: L.val }); });
+    layers.forEach(function (L) { items.push({ y: L.y + L.h / 2, mid: L.y + L.h / 2, name: L.name, val: L.val, upto: L.upto }); });
     spread(items, 18, BOT);
     items.forEach(function (it) {
       out += '<path class="lead-line" d="M130 ' + it.mid.toFixed(1) + ' H141 L148 ' + it.y.toFixed(1) + ' H152"/>';
       out += '<text class="t-name" x="156" y="' + (it.y + 4).toFixed(1) + '">' + esc(it.name) + '</text>';
-      out += '<text class="t-val" x="284" y="' + (it.y + 4).toFixed(1) + '">' + it.val + '</text>';
+      out += '<text class="t-val" x="280" y="' + (it.y + 4).toFixed(1) + '">' + it.val + '</text>' +
+        (it.upto ? '<text class="t-upto" x="376" y="' + (it.y + 4).toFixed(1) + '">(' + it.upto + ' gまで)</text>' : '');
     });
     $('cup').innerHTML = out;
   }
